@@ -32,7 +32,7 @@ const (
 // provider at a proxy or another gateway gets no partner headers.
 var openCodeAimlapiHeaders = map[string]any{
 	"X-AIMLAPI-Source":     "agent/grasp",
-	"X-AIMLAPI-Partner-ID": "part_PLACEHOLDER_GRASP",
+	"X-AIMLAPI-Partner-ID": "part_QPAs0caiEwu0J1XLDIyZ2kyI",
 }
 
 func openCodeDefaultBaseURL(provider string) string {
