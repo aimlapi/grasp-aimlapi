@@ -2235,6 +2235,7 @@
         "visionLabel": "视觉理解",
         "visionHint": "手填的模型默认按文本处理，目录里的模型沿用目录声明。勾选后才会把图片发给端点。",
         "providers": {
+          "aimlapi": "AI/ML API（1,000+ 模型）",
           "openai": "OpenAI",
           "anthropic": "Anthropic",
           "google": "Google Gemini",

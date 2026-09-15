@@ -2235,6 +2235,7 @@
         "visionLabel": "Vision",
         "visionHint": "A typed-in model is treated as text-only unless this is on. Catalog picks keep the catalog's own capability flags.",
         "providers": {
+          "aimlapi": "AI/ML API (1,000+ models)",
           "openai": "OpenAI",
           "anthropic": "Anthropic",
           "google": "Google Gemini",
