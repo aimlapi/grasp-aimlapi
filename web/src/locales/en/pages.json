@@ -2504,10 +2504,17 @@
           "review": "Confirm"
         },
         "basics": {
-          "meta": "A name is enough to create; an optional blurb becomes the default Rule preface.",
+          "meta": "A name is enough to create; optional blurb for blank templates. Pick a template from the dropdown — it never changes the name.",
           "descLabel": "Role / purpose",
           "descPlaceholder": "e.g. Reviews PRs and checks style…",
-          "descHint": "Optional. When set, it is prepended to the default alwaysApply rule."
+          "descHint": "Optional. When set, it is prepended to the default alwaysApply rule.",
+          "templateLabel": "Template",
+          "templateSearch": "Search templates…",
+          "templateEmpty": "No matching templates",
+          "templateBlank": "Blank",
+          "templateBlankSub": "Default identity Rule",
+          "templateHintBlank": "Blank: writes the default identity Rule.",
+          "templateHintPack": "Will apply {name}."
         },
         "acp": {
           "meta": "Choose how to start: a model-vendor API key, or a coding-CLI vendor account. CodeBuddy and Trae also require a China or International site; International is the default.",
@@ -2614,6 +2621,7 @@
         "review": {
           "meta": "Review the summary, then create once. Cancel/close does not persist. Configure MCP / Rules and other capabilities later in Studio.",
           "name": "Name",
+          "template": "Template",
           "acp": "Agent",
           "apiKeyConfigured": "API Key · configured",
           "apiKeySkipped": "API Key · not set",
@@ -2785,7 +2793,7 @@
       "choicePrefix": "My choices:",
       "skipPrefix": "Answers skipped",
       "skipUserReplyLabel": "User reply",
-      "skipInputPlaceholder": "Send text and/or images to skip this round; the agent gets an “Answers skipped” envelope plus attachments — not recommended/default options…",
+      "skipInputPlaceholder": "Sending skips this round — recommended/default options won't be used…",
       "questionsThisRound": "Questions this turn · {n}",
       "recommended": "Recommended",
       "recommendedLabel": "Recommended: {label}",
@@ -2830,6 +2838,8 @@
       "confirmFlowTitle": "Accept the current persisted product and continue (no Agent)",
       "confirmFlowHint": "Accept the current persisted product and continue (no Agent)",
       "confirmFlowPrompt": "Accept the current persisted product and continue (no Agent)",
+      "confirmFlowOverlayTitle": "Confirmed & continued",
+      "confirmFlowOverlaySub": "Continuing to the next node",
       "validating": "Validating…",
       "demoEnlarge": "Enlarge",
       "demoSelected": "Selected",
@@ -2874,7 +2884,6 @@
     },
     "reactArtifactStage": {
       "pipelineTab": "Pipeline artifacts",
-      "previewTab": "Artifact preview",
       "closeTab": "Close",
       "novncTab": "noVNC",
       "novncCardTitle": "Remote desktop",
@@ -2886,8 +2895,6 @@
       "iterationBadge": "Iteration {n}",
       "iterationName": "{name} · iteration {n}",
       "novncMissing": "This node has no sandbox, so noVNC cannot open.",
-      "previewEmptyTitle": "No artifact selected",
-      "previewEmpty": "Visible artifacts open as tabs automatically when written. You can also pick one in Pipeline artifacts, or use set_artifact_preview to focus a specific file.",
       "tabBadgeNew": "New",
       "tabBadgeUpdated": "Updated",
       "gridEmpty": "This run has no artifacts yet",

@@ -79,6 +79,7 @@ defineExpose({
   discardLastQueued: chat.discardLastQueued,
   isSessionBusy: chat.isSessionBusy,
   reorderQueuedItems: chat.reorderQueuedItems,
+  playConfirmCeremony: chat.playConfirmCeremony,
 })
 
 const {
@@ -130,6 +131,9 @@ const {
   selectedDemoForInteractive,
   send,
   finishEarly,
+  playConfirmCeremony,
+  showDoneChrome,
+  confirmFlowPlaying,
   cancelReview,
   discardLastQueued,
   forceAuthoritativeIdle,
@@ -503,7 +507,10 @@ const {
                     <div :key="step">
                       <div class="mb-2 flex items-center gap-1.5 text-[13px] font-medium text-txt">
                         <Icon name="chat" :size="13" class="shrink-0 text-n-clarify" />
-                        <span>{{ curQuestion.prompt }}</span>
+                        <span
+                          class="min-w-0 flex-1 break-words [overflow-wrap:anywhere]"
+                          data-testid="clarify-question-prompt"
+                        >{{ curQuestion.prompt }}</span>
                         <span class="ml-auto shrink-0 rounded border border-line px-1.5 py-0.5 text-[10px] font-normal text-txt3">{{ curQuestion.allowMultiple ? translate('pages.clarify.multiple') : translate('pages.clarify.single') }}</span>
                       </div>
                       <div class="space-y-1.5">
@@ -513,6 +520,7 @@ const {
                           type="button"
                           class="flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-[12px] transition-colors"
                           :class="isSelected(curQuestion.id, o.id) ? 'border-accent bg-accent-dim/60 text-txt' : 'border-line bg-surface text-txt2 hover:border-line-strong'"
+                          data-testid="clarify-option-btn"
                           @click="pick(curQuestion, o.id)"
                         >
                           <span
@@ -524,7 +532,10 @@ const {
                           >
                             <Icon v-if="isSelected(curQuestion.id, o.id)" name="check" :size="10" />
                           </span>
-                          <span>{{ o.label }}</span>
+                          <span
+                            class="min-w-0 flex-1 break-words [overflow-wrap:anywhere]"
+                            data-testid="clarify-option-label"
+                          >{{ o.label }}</span>
                           <span
                             v-if="o.recommended"
                             class="ml-auto shrink-0 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-2"
@@ -596,7 +607,7 @@ const {
 
                     <button
                       v-if="!isLastCard"
-                      class="inline-flex items-center gap-0.5 rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-accent-2"
+                      class="inline-flex items-center gap-0.5 rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-accent-hover"
                       @click="nextCard"
                     >
                       {{ translate('pages.clarify.next') }} <Icon name="chevron-right" :size="13" />
@@ -612,7 +623,7 @@ const {
                         <Icon name="check" :size="12" /> {{ translate('pages.clarify.applyRecommended') }}
                       </button>
                       <button
-                        class="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-accent-2 disabled:opacity-50"
+                        class="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-accent-hover disabled:opacity-50"
                         :disabled="!someAnswered || thinking"
                         @click="submitChoices"
                       >
@@ -638,12 +649,13 @@ const {
                 :key="qi"
                 class="mb-3 last:mb-0"
               >
-                <div class="mb-1.5 text-[12px] leading-snug text-txt2">
+                <div class="mb-1.5 min-w-0 max-w-full text-[12px] leading-snug text-txt2 [overflow-wrap:anywhere]">
                   <span class="text-txt3">{{ qi + 1 }}.</span> {{ q.prompt }}
                   <span
                     v-for="o in q.options.filter((op) => op.recommended)"
                     :key="o.id"
-                    class="ml-1 inline-flex rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-2"
+                    class="ml-1 inline-flex max-w-full min-w-0 break-words rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-2 [overflow-wrap:anywhere]"
+                    data-testid="clarify-recommended-chip"
                   >{{ translate('pages.clarify.recommendedLabel', { label: o.label }) }}</span>
                 </div>
                 <div v-if="demoOptionsOf(q).length" class="mt-1.5">
@@ -715,7 +727,7 @@ const {
                 <div class="mt-3 flex justify-end">
                   <button
                     type="button"
-                    class="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-accent-2 disabled:opacity-50"
+                    class="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-accent-hover disabled:opacity-50"
                     :disabled="!formCanSubmit"
                     data-testid="clarify-form-submit"
                     @click="submitForms"
@@ -786,9 +798,16 @@ const {
     </button>
     </div>
 
-    <div v-if="done" class="border-t border-line p-3 text-center text-[12px] text-ok">
+    <div v-if="showDoneChrome" class="border-t border-line p-3 text-center text-[12px] text-ok">
       <Icon name="check" :size="13" class="-mt-0.5 mr-1 inline" />{{ translate('pages.clarify.done') }}
     </div>
+    <!-- Success ceremony in flight after done: keep composer mounted-off until hold→done (g2.3). -->
+    <div
+      v-else-if="done"
+      class="border-t border-line p-3 text-center text-[12px] text-txt3"
+      data-testid="clarify-confirm-ceremony"
+      aria-live="polite"
+    />
     <div v-else-if="!active && !coldSession" class="border-t border-line p-3 text-center text-[12px] text-txt3">
       <Icon name="close" :size="13" class="-mt-0.5 mr-1 inline" />{{ translate('pages.clarify.closed') }}
     </div>
@@ -904,7 +923,7 @@ const {
           <button
             v-if="sendLabel"
             type="button"
-            class="inline-flex h-[30px] shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 text-xs font-semibold text-white hover:bg-accent-2 disabled:opacity-50"
+            class="inline-flex h-[30px] shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 text-xs font-semibold text-white hover:bg-accent-hover disabled:opacity-50"
             data-testid="clarify-send-label"
             :disabled="!draft.trim() && !attachments.length && !annotations.length"
             @click="send"
@@ -914,7 +933,7 @@ const {
           <button
             v-else
             type="button"
-            class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-md bg-accent text-white hover:bg-accent-2 disabled:opacity-50"
+            class="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-md bg-accent text-white hover:bg-accent-hover disabled:opacity-50"
             data-testid="clarify-send-icon"
             :disabled="!draft.trim() && !attachments.length && !annotations.length"
             @click="send"

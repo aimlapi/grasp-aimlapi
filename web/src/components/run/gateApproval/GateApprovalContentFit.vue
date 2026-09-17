@@ -138,6 +138,7 @@ const {
         :mobile="isMobile"
         :sidebar-width="400"
         :storage-key="REVIEW_SHELL_WIDTH_KEY_APPROVAL"
+        :host-confirm-flow="false"
       >
         <template #stage>
           <div class="flex h-full min-h-0 flex-col overflow-hidden">
@@ -225,7 +226,7 @@ const {
                   <p class="max-w-[42ch] text-[11px] text-err">{{ productLoadError }}</p>
                   <button
                     type="button"
-                    class="mt-1 bg-accent px-3.5 py-1.5 text-xs font-medium text-white hover:bg-accent-2"
+                    class="mt-1 bg-accent px-3.5 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
                     data-testid="content-fit-product-retry"
                     @click="retryLoadProduct"
                   >

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isGrasp } from '@/lib/shared/clarifyInteractive'
 /**
  * Run 详情「澄清」面板壳：OpenDesign 产物舞台 + ReAct 聊天。
  */
@@ -64,19 +65,24 @@ const annotations = defineModel<ReactAnnotation[]>('annotations', { default: () 
 const { t } = useI18n()
 const toast = useToast()
 
+const reviewShellRef = ref<{
+  playConfirmCeremony?: () => Promise<void>
+} | null>(null)
+
 const reviewChatRef = ref<{
   applyReviewFrame?: (frame: any) => boolean | void
   applyAcpEvents?: (events: any[] | undefined, nodeId?: string) => boolean | void
   discardLastQueued?: () => void
   isSessionBusy?: () => boolean
   isChatReady?: () => boolean
+  playConfirmCeremony?: () => Promise<void>
 } | null>(null)
 
 const artifacts = computed(() => props.run?.artifacts || [])
 const previewArtifact = computed(() => props.clarify?.previewArtifact || '')
 const nodeType = computed(() => props.run?.nodes?.find((n) => n.id === props.nodeId)?.type || '')
 // Approve defaults to off; ReactArtifactStage silently probes previews and upgrades to app when registered.
-const remoteKind = computed(() => (nodeType.value === 'approve' ? 'off' : 'sandbox'))
+const remoteKind = computed(() => (isGrasp(nodeType.value) ? 'off' : 'sandbox'))
 
 function onRemotePick(payload: AppPreviewPickPayload) {
   if (!props.inputActive) return
@@ -96,6 +102,17 @@ defineExpose({
   discardLastQueued: () => reviewChatRef.value?.discardLastQueued?.(),
   isSessionBusy: () => !!reviewChatRef.value?.isSessionBusy?.(),
   isChatReady: () => !!reviewChatRef.value?.isChatReady?.(),
+  playConfirmCeremony: async () => {
+    // Overlay mounts on ReviewShell. ClarifyChat inject misses slotted provide, so
+    // preferring chat no-ops and never reaches the host (plan g1.1 / g1.2).
+    // Mark chat cycle first (confirmFlowPlayedForDone), then play the real host.
+    void reviewChatRef.value?.playConfirmCeremony?.()
+    if (reviewShellRef.value?.playConfirmCeremony) {
+      await reviewShellRef.value.playConfirmCeremony()
+      return
+    }
+    await reviewChatRef.value?.playConfirmCeremony?.()
+  },
 })
 </script>
 
@@ -122,6 +139,7 @@ defineExpose({
   </div>
   <ReviewShell
     v-else
+    ref="reviewShellRef"
     class="h-full min-h-0"
     :mobile="mobile"
     :sidebar-width="REVIEW_SIDEBAR"

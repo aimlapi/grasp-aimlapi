@@ -6,7 +6,7 @@ import { api } from '@/lib/api/api'
 import { useToast } from '@/lib/composables/useToast'
 import { useImageAttachments } from '@/lib/composables/useImageAttachments'
 import { readStoredProjectId } from '@/lib/composables/useProjectContext'
-import { approveFirstNodeId, isPublishedApproveFirst } from '@/lib/run/approveFirstPipeline'
+import { graspFirstNodeId, isPublishedGraspFirst } from '@/lib/run/graspFirstPipeline'
 import {
   clearHomeComposerDraft,
   loadHomeComposerDraft,
@@ -144,7 +144,7 @@ export function useHomeApproveChat() {
 
   const pipelines = computed(() =>
     workflows.value
-      .filter((w) => isPublishedApproveFirst(w) && !!w.showOnHome)
+      .filter((w) => isPublishedGraspFirst(w) && !!w.showOnHome)
       .map((w) => ({
         ...w,
         projectName: resolveHomeProjectName(w.projectId, projectNamesById.value),
@@ -368,10 +368,14 @@ export function useHomeApproveChat() {
   }
 
   function goGates(runId: string, nodeId?: string) {
-    return router.push({
-      path: '/gates',
-      query: nodeId ? { run: runId, node: nodeId } : { run: runId },
-    })
+    // Align inbox filters to the pipeline being started (plan g1.1). Use the
+    // workflow object's projectId only — never a hard-coded project name/UUID.
+    const wf = selected.value || launchTarget.value
+    const projectId = (wf?.projectId || '').trim()
+    const query: Record<string, string> = { run: runId }
+    if (nodeId) query.node = nodeId
+    if (projectId) query.projectId = projectId
+    return router.push({ path: '/gates', query })
   }
 
   /**
@@ -381,7 +385,7 @@ export function useHomeApproveChat() {
    */
   async function afterStart(runId: string, text: string, images: ClarifyImage[]) {
     const wf = selected.value || launchTarget.value
-    const knownNodeId = wf ? approveFirstNodeId(wf) || '' : ''
+    const knownNodeId = wf ? graspFirstNodeId(wf) || '' : ''
     setHomeApproveHandoff({ runId, nodeId: knownNodeId, text, images })
     await goGates(runId, knownNodeId || undefined)
   }

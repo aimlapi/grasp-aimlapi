@@ -56,12 +56,17 @@ const emit = defineEmits<{
   stagedPick: [payload: AppPreviewPickPayload | null]
 }>()
 
+const reviewShellRef = ref<{
+  playConfirmCeremony?: () => Promise<void>
+} | null>(null)
+
 const reviewChatRef = ref<{
   applyReviewFrame?: (frame: any) => boolean | void
   applyAcpEvents?: (events: any[] | undefined, nodeId?: string) => boolean | void
   discardLastQueued?: () => void
   isSessionBusy?: () => boolean
   isChatReady?: () => boolean
+  playConfirmCeremony?: () => Promise<void>
 } | null>(null)
 
 const remoteKind = computed(() => (props.node.type === 'app_preview' ? 'app' : 'off'))
@@ -73,11 +78,21 @@ defineExpose({
   discardLastQueued: () => reviewChatRef.value?.discardLastQueued?.(),
   isSessionBusy: () => !!reviewChatRef.value?.isSessionBusy?.(),
   isChatReady: () => !!reviewChatRef.value?.isChatReady?.(),
+  playConfirmCeremony: async () => {
+    // Prefer ReviewShell host — chat inject often misses slotted provide (plan g1.2).
+    void reviewChatRef.value?.playConfirmCeremony?.()
+    if (reviewShellRef.value?.playConfirmCeremony) {
+      await reviewShellRef.value.playConfirmCeremony()
+      return
+    }
+    await reviewChatRef.value?.playConfirmCeremony?.()
+  },
 })
 </script>
 
 <template>
   <ReviewShell
+    ref="reviewShellRef"
     class="h-full min-h-0"
     :mobile="mobile"
     :sidebar-width="REVIEW_SIDEBAR"

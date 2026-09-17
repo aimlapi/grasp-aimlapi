@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isApproveFirstPipeline, isPublishedApproveFirst, approveFirstNodeId } from './approveFirstPipeline'
+import { isGraspFirstPipeline, isPublishedGraspFirst, graspFirstNodeId } from './graspFirstPipeline'
 import type { WFEdge, WFNode } from '@/lib/shared/types'
 
 function graph(nodes: Partial<WFNode>[], edges: Partial<WFEdge>[]) {
@@ -21,10 +21,10 @@ function graph(nodes: Partial<WFNode>[], edges: Partial<WFEdge>[]) {
   }
 }
 
-describe('isApproveFirstPipeline', () => {
+describe('isGraspFirstPipeline', () => {
   it('matches input → approve', () => {
     expect(
-      isApproveFirstPipeline(
+      isGraspFirstPipeline(
         graph(
           [
             { id: 'in', type: 'input' },
@@ -40,9 +40,27 @@ describe('isApproveFirstPipeline', () => {
     ).toBe(true)
   })
 
+  it('matches input → grasp (canonical type)', () => {
+    expect(
+      isGraspFirstPipeline(
+        graph(
+          [
+            { id: 'in', type: 'input' },
+            { id: 'g', type: 'grasp' },
+            { id: 'out', type: 'output' },
+          ],
+          [
+            { source: 'in', target: 'g' },
+            { source: 'g', target: 'out' },
+          ],
+        ),
+      ),
+    ).toBe(true)
+  })
+
   it('rejects input → react', () => {
     expect(
-      isApproveFirstPipeline(
+      isGraspFirstPipeline(
         graph(
           [
             { id: 'in', type: 'input' },
@@ -57,7 +75,7 @@ describe('isApproveFirstPipeline', () => {
 
   it('rejects graphs without an input node', () => {
     expect(
-      isApproveFirstPipeline(
+      isGraspFirstPipeline(
         graph([{ id: 'ap', type: 'approve' }, { id: 'out', type: 'output' }], [
           { source: 'ap', target: 'out' },
         ]),
@@ -67,7 +85,7 @@ describe('isApproveFirstPipeline', () => {
 
   it('uses the unguarded success edge when a when-guarded sibling exists', () => {
     expect(
-      isApproveFirstPipeline(
+      isGraspFirstPipeline(
         graph(
           [
             { id: 'in', type: 'input' },
@@ -85,7 +103,7 @@ describe('isApproveFirstPipeline', () => {
 
   it('accepts a single success edge even when it has when', () => {
     expect(
-      isApproveFirstPipeline(
+      isGraspFirstPipeline(
         graph(
           [
             { id: 'in', type: 'input' },
@@ -99,7 +117,7 @@ describe('isApproveFirstPipeline', () => {
 
   it('ignores failure edges leaving input', () => {
     expect(
-      isApproveFirstPipeline(
+      isGraspFirstPipeline(
         graph(
           [
             { id: 'in', type: 'input' },
@@ -112,7 +130,7 @@ describe('isApproveFirstPipeline', () => {
     ).toBe(false)
   })
 
-  it('isPublishedApproveFirst requires published status', () => {
+  it('isPublishedGraspFirst requires published status', () => {
     const g = graph(
       [
         { id: 'in', type: 'input' },
@@ -120,8 +138,8 @@ describe('isApproveFirstPipeline', () => {
       ],
       [{ source: 'in', target: 'ap' }],
     )
-    expect(isPublishedApproveFirst({ status: 'draft', ...g })).toBe(false)
-    expect(isPublishedApproveFirst({ status: 'published', ...g })).toBe(true)
-    expect(approveFirstNodeId(g)).toBe('ap')
+    expect(isPublishedGraspFirst({ status: 'draft', ...g })).toBe(false)
+    expect(isPublishedGraspFirst({ status: 'published', ...g })).toBe(true)
+    expect(graspFirstNodeId(g)).toBe('ap')
   })
 })

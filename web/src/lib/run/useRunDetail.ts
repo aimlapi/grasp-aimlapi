@@ -32,6 +32,7 @@ import { pickDefaultTimelineNodeId } from '@/lib/run/runStats'
 import { useRunDetailLiveLog } from '@/lib/run/useRunDetailLiveLog'
 import { useRunDetailWs } from '@/lib/run/useRunDetailWs'
 import { useRunDetailSelection } from '@/lib/run/useRunDetailSelection'
+import { playConfirmFlowCeremony } from '@/lib/inbox/confirmFlowCeremony'
 import type { AcpEvent, NodeRun, NodeRunStatus, Run, Workflow } from '@/lib/shared/types'
 import { isClearlyInvalidRunRouteId } from '@/lib/pm/pmCitationShape'
 import type { RunPriority } from '@/components/ui/PrioritySegmented.vue'
@@ -107,11 +108,13 @@ const reviewChatRef = ref<{
   discardLastQueued?: () => void
   isSessionBusy?: () => boolean
   isChatReady?: () => boolean
+  playConfirmCeremony?: () => Promise<void>
 } | null>(null)
 
 const gateApprovalRef = ref<{
   applyReviewFrame?: (frame: any) => void
   applyAcpEvents?: (events: AcpEvent[] | undefined) => boolean | void
+  playConfirmCeremony?: () => Promise<void>
 } | null>(null)
 
 const ACTIVE = ['queued', 'running', 'waiting_human']
@@ -573,9 +576,11 @@ async function onGateResolve(action: string, form: Record<string, any> = {}) {
   if (!run.value.gate || gateSubmitting.value) return
   gateSubmitting.value = true
   gateError.value = null
+  const positive = action === 'pass' || action === 'approve'
+  // Click intent: play overlay before resume returns (plan g1.1).
+  if (positive) void playConfirmFlowCeremony(gateApprovalRef.value)
   try {
     await api.resumeGate(runId.value, run.value.gate.nodeId, action, form)
-    const positive = action === 'pass' || action === 'approve'
     toast.success(positive ? t('pages.gateApproval.approveSuccess') : t('pages.gateApproval.rejectSuccess'))
   } catch (e: any) {
     // Surface the backend rejection (e.g. a required form field, or the run
@@ -604,6 +609,8 @@ async function onClarifySend(
       ? mergeStagedAppPreviewPick(annotations)
       : annotations
   if (anns !== annotations) lastStagedAppPreviewPick.value = null
+  // Click intent: play overlay before wrap-up HTTP (plan g1.1); never wait for forceOk/done.
+  if (force) void playConfirmFlowCeremony(reviewChatRef.value)
   try {
     if (retryLast) {
       await api.reactReply(runId.value, nodeId, text, images, force, anns, true)

@@ -45,6 +45,8 @@ import {
   CLARIFY_AUTO_GROW_MIN,
 } from '@/lib/inbox/composerAutoGrow'
 import type { Ref } from 'vue'
+import { isGrasp } from '@/lib/shared/clarifyInteractive'
+import { useConfirmFlowCeremony } from '@/lib/inbox/confirmFlowCeremony'
 
 /** Element-level clone so queue rows never share annotation object refs with composer. */
 function cloneReactAnnotations(anns?: ReactAnnotation[] | null): ReactAnnotation[] {
@@ -129,6 +131,23 @@ const persistedTurns = computed(() => props.turns ?? [])
 const thinking = ref(false)
 /** Review confirm mid-state: re-validating product (not Agent thinking). */
 const validating = ref(false)
+/** Success overlay host from ReviewShell (g2.1); optional in unit mounts. */
+const confirmFlow = useConfirmFlowCeremony()
+/** True after we ran (or parent ran) the success ceremony for the current done cycle. */
+let confirmFlowPlayedForDone = false
+const confirmFlowPlaying = computed(() => !!confirmFlow?.playing.value)
+/** Hold done footer until check draw finishes (g2.3). */
+const showDoneChrome = computed(
+  () => !!props.done && !confirmFlowPlaying.value,
+)
+
+async function playConfirmCeremony(): Promise<void> {
+  confirmFlowPlayedForDone = true
+  if (!confirmFlow) return
+  // Same click may play from finishEarly and again from parent force — keep one play (g1.1).
+  if (confirmFlow.playing.value) return
+  await confirmFlow.play()
+}
 // SandboxChat-aligned pending-send queue (clarify + review). Items live ONLY in
 // the bottom panel until turn_begin materializes transcript bubbles.
 const queued = ref<QueueItem[]>([])
@@ -137,14 +156,14 @@ const liveTurns = ref<ClarifyTurn[]>([])
 const showApproveEmptyHint = computed(
   () =>
     !props.reviewMode &&
-    props.nodeType === 'approve' &&
+    isGrasp(props.nodeType) &&
     persistedTurns.value.length === 0 &&
     liveTurns.value.length === 0 &&
     queued.value.length === 0 &&
     !seedHumanTurn.value,
 )
 const useConfirmFlowAction = computed(
-  () => props.reviewMode || props.nodeType === 'approve' || !!props.forceConfirmFlow,
+  () => props.reviewMode || isGrasp(props.nodeType) || !!props.forceConfirmFlow,
 )
 
 function humanMatchesSeed(t: ClarifyTurn, seed: ClarifyTurn): boolean {
@@ -475,7 +494,7 @@ const pendingInteractiveOpen = computed(
 const inputPlaceholder = computed(() => {
   if (pendingInteractiveOpen.value) return translate('pages.clarify.skipInputPlaceholder')
   if (props.reviewMode) return translate('pages.clarify.reviewInputPlaceholder')
-  if (props.nodeType === 'approve') return translate('pages.clarify.approveInputPlaceholder')
+  if (isGrasp(props.nodeType)) return translate('pages.clarify.approveInputPlaceholder')
   return translate('pages.clarify.inputPlaceholder')
 })
 
@@ -668,6 +687,11 @@ watch(
     if (d) {
       thinking.value = false
       validating.value = false
+      // Overlay is owned by the click path (finishEarly / parent force). Never
+      // auto-play on done/node_complete (plan g1.1) — that caused the #613 regression.
+    } else {
+      confirmFlowPlayedForDone = false
+      confirmFlow?.reset()
     }
   },
 )
@@ -1118,6 +1142,17 @@ function finishEarly() {
   if (props.reviewMode) {
     if (validating.value || confirmDisabled.value) return
     validating.value = true
+    // Click intent: play overlay immediately; parent force must not wait for done (g1.1).
+    void playConfirmCeremony()
+    emit('finish')
+    void scrollBottom()
+    return
+  }
+  // Grasp / confirm-flow: hide thinking placeholder — overlay is the main feedback (g2.1).
+  if (useConfirmFlowAction.value) {
+    if (validating.value || confirmDisabled.value) return
+    validating.value = true
+    void playConfirmCeremony()
     emit('finish')
     void scrollBottom()
     return
@@ -1661,6 +1696,9 @@ function retryLastFailed() {
     selectedDemoForInteractive,
     send,
     finishEarly,
+    playConfirmCeremony,
+    showDoneChrome,
+    confirmFlowPlaying,
     cancelReview,
     discardLastQueued,
     forceAuthoritativeIdle,

@@ -51,6 +51,7 @@ import { HOME_COMPOSER_DRAFT_KEY } from '@/lib/run/homeComposerDraft'
 import { HOME_PRIORITY_MEMORY_KEY } from '@/lib/run/useHomeApproveChat'
 import { setBrandSettings } from '@/lib/composables/useBrandSettings'
 import DashboardView from './DashboardView.vue'
+import dashboardSource from './DashboardView.vue?raw'
 
 const HomePreviewAppModalStub = {
   props: ['open', 'title', 'width'],
@@ -663,7 +664,7 @@ describe('DashboardView home composer', () => {
       firstMessage: { text: '把登录做清楚', images: [] },
     })
     expect(mocks.reactReply).not.toHaveBeenCalled()
-    expect(mocks.push).toHaveBeenCalledWith({ path: '/gates', query: { run: 'run-9', node: 'ap' } })
+    expect(mocks.push).toHaveBeenCalledWith({ path: '/gates', query: { run: 'run-9', node: 'ap', projectId: 'proj-1' } })
     wrapper.unmount()
   })
 
@@ -837,7 +838,7 @@ describe('DashboardView home composer', () => {
       },
     })
     expect(mocks.reactReply).not.toHaveBeenCalled()
-    expect(mocks.push).toHaveBeenCalledWith({ path: '/gates', query: { run: 'run-9', node: 'ap' } })
+    expect(mocks.push).toHaveBeenCalledWith({ path: '/gates', query: { run: 'run-9', node: 'ap', projectId: 'proj-1' } })
     wrapper.unmount()
     vi.unstubAllGlobals()
   })
@@ -1006,6 +1007,45 @@ describe('DashboardView home composer', () => {
     wrapper.unmount()
   })
 
+  // plan g3.1 — the plus is an SVG icon whose ink is geometrically centered in the square,
+  // so flex centering no longer depends on the text glyph baseline (font-independent).
+  it('renders the new-workflow plus as a centered svg icon instead of a text glyph', async () => {
+    const wrapper = mountDashboard()
+    await flushPromises()
+    const plus = wrapper.get('[data-testid="home-new-workflow"] .home-shell__card-plus')
+    // no text node => no font baseline to push the glyph off-center
+    expect(plus.text().trim()).toBe('')
+
+    const svg = plus.get('svg')
+    // size matches sibling plus icons (e.g. home-composer-plus) so the ink is not enlarged
+    expect(svg.attributes('width')).toBe('16')
+    expect(svg.attributes('height')).toBe('16')
+    const viewBox = svg.attributes('viewBox') ?? ''
+    const [vbX, vbY, vbW, vbH] = viewBox.split(/\s+/).map(Number)
+    expect(vbW).toBe(vbH)
+    expect(vbX + vbW / 2).toBe(vbY + vbH / 2)
+
+    // each stroke of the plus is centered on the viewBox center
+    const d = svg.get('path').attributes('d') ?? ''
+    const vertical = d.match(/M(\d+) (\d+)v(\d+)/)
+    const horizontal = d.match(/M(\d+) (\d+)h(\d+)/)
+    expect(vertical).not.toBeNull()
+    expect(horizontal).not.toBeNull()
+    const vMid = { x: Number(vertical![1]), y: Number(vertical![2]) + Number(vertical![3]) / 2 }
+    const hMid = { x: Number(horizontal![1]) + Number(horizontal![3]) / 2, y: Number(horizontal![2]) }
+    expect(vMid).toEqual({ x: vbX + vbW / 2, y: vbY + vbH / 2 })
+    expect(hMid).toEqual(vMid)
+
+    // the flex box still centers its svg child geometrically (no font baseline involved)
+    expect(svg.element.parentElement).toBe(plus.element)
+    const css = dashboardSource
+    expect(css).toMatch(/\.home-shell__card-plus\s*\{[^}]*display:\s*flex[^}]*\}/)
+    expect(css).toMatch(/\.home-shell__card-plus\s*\{[^}]*align-items:\s*center[^}]*\}/)
+    expect(css).toMatch(/\.home-shell__card-plus\s*\{[^}]*justify-content:\s*center[^}]*\}/)
+    expect(css).toMatch(/\.home-shell__card-plus\s*>\s*svg\s*\{[^}]*display:\s*block[^}]*\}/)
+    wrapper.unmount()
+  })
+
   // plan g1.2 — empty pipeline list still offers the same plus card
   it('keeps the new-workflow card when the home pipeline list is empty', async () => {
     mocks.listWorkflows.mockResolvedValue([])
@@ -1118,5 +1158,140 @@ describe('DashboardView home composer', () => {
       'home-shell__card--selected',
     )
     wrapper.unmount()
+  })
+
+  // plan g1.1 — wait blank: no loading copy, cards, or add card
+  it('plan g1.1 — while pipelines load, composer stays and rail stays blank', async () => {
+    let resolveList!: (value: Workflow[]) => void
+    mocks.listWorkflows.mockImplementation(
+      () => new Promise<Workflow[]>((resolve) => { resolveList = resolve }),
+    )
+    const wrapper = mountDashboard()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="home-composer"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="home-pipelines-loading"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="home-pipeline-enter"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="home-new-workflow"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="home-pipeline-cards"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toMatch(/加载中/)
+
+    resolveList([approveWf])
+    await flushPromises()
+    // plan g1.2 — same settle: enter group ready with cards + add
+    const enter = wrapper.get('[data-testid="home-pipeline-enter"]')
+    expect(enter.classes()).toContain('home-pipeline-enter--ready')
+    expect(enter.find('[data-testid="home-pipeline-card-wf-ap"]').exists()).toBe(true)
+    expect(enter.find('[data-testid="home-new-workflow"]').exists()).toBe(true)
+    expect(dashboardSource).not.toMatch(/setTimeout\([^)]*pipelineRail|minVisible|SHOW_AFTER/)
+    wrapper.unmount()
+  })
+
+  // plan g1.3 — many cards share the same group enter (no per-card delay in source)
+  it('plan g1.3 — many pipeline cards share one enter group without nth-child delays', async () => {
+    const many = Array.from({ length: 8 }, (_, i) => ({
+      ...approveWf,
+      id: `wf-many-${i}`,
+      name: `流水线 ${i + 1}`,
+    }))
+    mocks.listWorkflows.mockResolvedValue(many)
+    const wrapper = mountDashboard()
+    await flushPromises()
+    const enter = wrapper.get('[data-testid="home-pipeline-enter"]')
+    expect(enter.findAll('[data-testid^="home-pipeline-card-wf-many-"]').filter(
+      (n) => /^home-pipeline-card-wf-many-\d+$/.test(n.attributes('data-testid') || ''),
+    ).length).toBe(8)
+    expect(enter.find('[data-testid="home-new-workflow"]').exists()).toBe(true)
+    expect(dashboardSource).not.toMatch(/nth-child\([^)]+\)[^{]*\{[^}]*animation-delay/)
+    expect(dashboardSource).toMatch(/home-pipeline-rail-enter 420ms/)
+    wrapper.unmount()
+  })
+
+  // plan g2.1 — empty list: empty copy + add card in the same enter group
+  it('plan g2.1 — empty pipelines reveal empty state and add card together', async () => {
+    mocks.listWorkflows.mockResolvedValue([])
+    const wrapper = mountDashboard()
+    await flushPromises()
+    const enter = wrapper.get('[data-testid="home-pipeline-enter"]')
+    expect(enter.find('[data-testid="home-pipelines-empty"]').exists()).toBe(true)
+    expect(enter.find('[data-testid="home-new-workflow"]').exists()).toBe(true)
+    expect(enter.classes()).toContain('home-pipeline-enter--ready')
+    wrapper.unmount()
+  })
+
+  // plan g2.1 — failure then retry plays enter once on success
+  it('plan g2.1 — load error hides rail; retry success reveals enter group', async () => {
+    mocks.listWorkflows.mockRejectedValueOnce(new Error('network down'))
+    const wrapper = mountDashboard()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="dashboard-load-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="home-pipeline-enter"]').exists()).toBe(false)
+
+    mocks.listWorkflows.mockResolvedValue([approveWf])
+    await wrapper.get('[data-testid="dashboard-retry"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="dashboard-load-error"]').exists()).toBe(false)
+    const enter = wrapper.get('[data-testid="home-pipeline-enter"]')
+    expect(enter.classes()).toContain('home-pipeline-enter--ready')
+    expect(enter.find('[data-testid="home-pipeline-card-wf-ap"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  // plan g2.2 — reloadAfterCreate keeps revealed rail (no reset of pipelineRailRevealed)
+  it('plan g2.2 — reloadAfterCreate keeps enter group mounted without resetting reveal', async () => {
+    const wrapper = mountDashboard()
+    await flushPromises()
+    const enterBefore = wrapper.get('[data-testid="home-pipeline-enter"]').element
+    expect(dashboardSource).not.toMatch(/pipelineRailRevealed\.value = false/)
+
+    const created = {
+      ...approveWf,
+      id: 'wf-reload-keep',
+      name: '刷新保持',
+    }
+    mocks.createWorkflowFromBaseline.mockResolvedValue(created)
+    mocks.listWorkflows.mockResolvedValue([approveWf, created])
+    await wrapper.get('[data-testid="home-new-workflow"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-testid="home-create-workflow-name"]').setValue('刷新保持')
+    const url = wrapper.find('input[placeholder*="https"]')
+    await url.setValue('https://github.com/org/reload-keep')
+    await flushPromises()
+    await wrapper.get('[data-testid="home-create-submit"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="home-pipeline-enter"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="home-pipeline-enter"]').element).toBe(enterBefore)
+    expect(wrapper.find('[data-testid="home-pipeline-card-wf-reload-keep"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  // plan g2.2 — hide does not remount enter group
+  it('plan g2.2 — hidePipelineFromHome updates cards without remounting enter group', async () => {
+    const second = {
+      ...approveWf,
+      id: 'wf-keep',
+      name: '保留卡',
+      projectId: 'proj-2',
+    }
+    mocks.listWorkflows.mockResolvedValue([approveWf, second])
+    mocks.listProjects.mockResolvedValue([
+      { id: 'proj-1', name: '综合项目组', description: '', variables: [] },
+      { id: 'proj-2', name: 'SkillHub', description: '', variables: [] },
+    ])
+    const wrapper = mountDashboard()
+    await flushPromises()
+    const enterBefore = wrapper.get('[data-testid="home-pipeline-enter"]').element
+    await wrapper.get('[data-testid="home-pipeline-card-wf-ap"]').trigger('contextmenu')
+    await teleported('home-pipeline-menu-hide').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="home-pipeline-card-wf-ap"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="home-pipeline-enter"]').element).toBe(enterBefore)
+    wrapper.unmount()
+  })
+
+  // plan g2.3 — reduced-motion rules cover the enter classes (source)
+  it('plan g2.3 — prefers-reduced-motion disables pipeline enter animation', () => {
+    expect(dashboardSource).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.home-pipeline-enter--ready[\s\S]*animation:\s*none/,
+    )
   })
 })

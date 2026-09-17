@@ -8,11 +8,12 @@ import ParagraphInput from '../ui/ParagraphInput.vue'
 import GateReactStreamPanel from './GateReactStreamPanel.vue'
 import PendingSendQueuePanel, { type PendingQueueRow } from './PendingSendQueuePanel.vue'
 import type { ClarifyTurn, ClarifyImage, ReactAnnotation, AcpEvent } from '@/lib/shared/types'
+import { isGrasp } from '@/lib/shared/clarifyInteractive'
 import AnnotationChip from './AnnotationChip.vue'
 
 /**
  * Thin mode wrapper around ClarifyChat / a gate-local composer.
- * - clarify: chips + attachments +「发送澄清回复」(classic react hides finish; Approve shows 确认并流转)
+ * - clarify: chips + attachments +「发送澄清回复」(classic react hides finish; Grasp shows 确认并流转)
  * - review: ClarifyChat chips + attachments + send +「确认并流转」
  * - gate: local composer with the same review semantics —「发送」+「确认并流转」
  *   (no 打回修改 / 通过并流转). Send → GateReactRevise; confirm → ResumeGate(approve/pass).
@@ -127,6 +128,7 @@ const chatRef = ref<{
   cancelReview: () => void
   discardLastQueued: () => void
   isSessionBusy?: () => boolean
+  playConfirmCeremony?: () => Promise<void>
 } | null>(null)
 
 defineExpose({
@@ -158,6 +160,7 @@ defineExpose({
    * Hosts gate soft-refresh on this — must not be missing through the composer (g1.3).
    */
   isSessionBusy: () => !!chatRef.value?.isSessionBusy?.(),
+  playConfirmCeremony: () => chatRef.value?.playConfirmCeremony?.() ?? Promise.resolve(),
 })
 
 const { t } = useI18n()
@@ -246,7 +249,7 @@ function onConfirm() {
       :force-confirm-flow="forceConfirm"
       :review-mode="mode === 'review'"
       :annotate-enabled="mode === 'clarify' || mode === 'review'"
-      :hide-finish="!canPass || (mode === 'clarify' && nodeType !== 'approve' && !forceConfirm)"
+      :hide-finish="!canPass || (mode === 'clarify' && !isGrasp(nodeType) && !forceConfirm)"
       :seed-human-text="seedHumanText"
       :seed-human-images="seedHumanImages"
       :send-label="mode === 'clarify' ? t('pages.reviewComposer.sendClarify') : undefined"
@@ -327,7 +330,7 @@ function onConfirm() {
           <button
             v-if="canReject"
             type="button"
-            class="inline-flex h-[30px] shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 text-xs font-semibold text-white hover:bg-accent-2 disabled:cursor-not-allowed disabled:opacity-50"
+            class="inline-flex h-[30px] shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 text-xs font-semibold text-white hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             data-testid="review-composer-send"
             :disabled="!canSubmitGate"
             @click="onSend"

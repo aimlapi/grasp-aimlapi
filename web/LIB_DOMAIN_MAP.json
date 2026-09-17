@@ -7,6 +7,7 @@
       "agentOrg.ts",
       "agentStudioDraft.ts",
       "agentTeamWizard.ts",
+      "agentTemplateOptions.ts",
       "backendAuthGuide.ts",
       "gitCredentialAnalysis.ts",
       "openCodeCatalog.ts",
@@ -49,6 +50,7 @@
       "clarifyEmptyFail.ts",
       "clarifyInboxStage.ts",
       "composerAutoGrow.ts",
+      "confirmFlowCeremony.ts",
       "gateShareLink.ts",
       "gateUpstream.ts",
       "inboxActiveSelection.ts",
@@ -94,6 +96,7 @@
       "dialogueAcpDelivery.ts",
       "draftIdb.ts",
       "exportStructuredArtifact.ts",
+      "graspFirstPipeline.ts",
       "homeApproveHandoff.ts",
       "homeComposerDraft.ts",
       "isVisualHtmlCard.ts",
@@ -185,13 +188,13 @@
     ]
   },
   "totals": {
-    "agent": 17,
+    "agent": 18,
     "api": 3,
     "composables": 17,
-    "inbox": 22,
+    "inbox": 23,
     "pm": 7,
     "project": 4,
-    "run": 55,
+    "run": 56,
     "shared": 41
   }
 }

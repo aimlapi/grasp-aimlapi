@@ -30,6 +30,7 @@ import {
   pickNextActiveAfterRemove,
 } from '@/lib/inbox/inboxActiveSelection'
 import {
+  isApproveAwaitingHuman,
   isApproveStillStarting,
   isStartFailedRun,
   makeIncomingGhost,
@@ -48,6 +49,7 @@ import { isNodeEventsUnavailable } from '@/lib/run/nodeEventsResponse'
 import { createWsReconnectController } from '@/lib/run/wsReconnect'
 import { useToast } from '@/lib/composables/useToast'
 import { inboxShareKind, isHumanGateInboxItem, isShareableInboxItem } from '@/lib/inbox/gateShareLink'
+import { createConfirmFlowCeremony } from '@/lib/inbox/confirmFlowCeremony'
 import {
   consumeHomeApproveHandoff,
   homeApproveHandoffMatchesRun,
@@ -119,12 +121,32 @@ const mobileView = ref<'list' | 'detail'>('list')
 const listScrollTop = ref(0)
 const listEl = ref<HTMLElement | null>(null)
 const gateApprovalRef = ref<InstanceType<typeof GateApproval> | null>(null)
+/** ReviewShell hosts ConfirmFlowOverlay for run-detail panels; inbox plays page-level ceremony. */
+const reviewShellRef = ref<{ playConfirmCeremony?: () => Promise<void> } | null>(null)
 const reviewChatRef = ref<{
   applyReviewFrame?: (frame: any) => boolean | void
   applyAcpEvents?: (events: any[] | undefined, nodeId?: string) => boolean | void
   discardLastQueued?: () => void
   isSessionBusy?: () => boolean
+  playConfirmCeremony?: () => Promise<void>
 } | null>(null)
+/**
+ * Page-level ceremony — survives active switch / shell remount so the overlay stays
+ * visible after the list card leaves (plan g1.2). Child inject often misses slotted provide.
+ */
+const inboxConfirmFlow = createConfirmFlowCeremony()
+/**
+ * Keep the desk column mounted while the overlay plays after the last card leaves
+ * (listItems empty would otherwise tear down the host via v-if).
+ */
+const confirmFlowDeskHold = ref(false)
+
+function playInboxConfirmFlowCeremony(): Promise<void> {
+  confirmFlowDeskHold.value = true
+  return inboxConfirmFlow.play().finally(() => {
+    confirmFlowDeskHold.value = false
+  })
+}
 /**
  * Review/clarify WS frames that arrived while ClarifyChat was unmounted
  * (hard loadActiveRun nulls activeRun → ReviewComposer gone). Flushed after mount.
@@ -420,6 +442,11 @@ function mergeIncomingGhost(items: InboxItem[]): InboxItem[] {
   // Cold refresh / reopen with ?run= after the approval already left pending:
   // confirm against the run before keeping a "启动中" ghost forever.
   void confirmIncomingGhostStillNeeded(t)
+  // Prefer a parked deep-link pin (plan g2.1) over rebuilding a starting card.
+  const pinned = incomingGhost.value
+  if (pinned && pinned.runId === t.runId && !isStartingInboxItem(pinned)) {
+    return [pinned, ...items]
+  }
   const seed = peekHomeApproveHandoff() || homeSeed.value
   const ghost = makeIncomingGhost(t, String(seed?.text || ''))
   incomingGhost.value = ghost
@@ -430,10 +457,14 @@ function mergeIncomingGhost(items: InboxItem[]): InboxItem[] {
  * Drop (or fail) a client-only starting ghost when the run is no longer booting.
  * Without this, a stale `?run=&node=` after successful flow keeps rebuilding
  * an empty "启动中" card on every loadList.
+ *
+ * When the approve has parked (`waiting_human`) but the current filters omit the
+ * row, pin it from an unfiltered peek so the deep-link target stays visible
+ * until it truly leaves pending (plan g2.1).
  */
 let incomingGhostConfirmInFlight = ''
 async function confirmIncomingGhostStillNeeded(target: { runId: string; nodeId: string }) {
-  const nodeId = target.nodeId || 'approve'
+  const nodeId = target.nodeId || 'grasp'
   const key = `${target.runId}:${nodeId}`
   // loadList / starting-poll can call this every few seconds for the same deep
   // link; one in-flight check is enough.
@@ -443,7 +474,7 @@ async function confirmIncomingGhostStillNeeded(target: { runId: string; nodeId: 
     const run = await api.getRun(target.runId)
     // A newer navigation may have re-armed a different target while we awaited.
     const cur = incomingTarget()
-    if (!cur || `${cur.runId}:${cur.nodeId || 'approve'}` !== key) return
+    if (!cur || `${cur.runId}:${cur.nodeId || 'grasp'}` !== key) return
     if (isStartFailedRun(run, nodeId)) {
       const ghost =
         incomingGhost.value && itemKey(incomingGhost.value) === key
@@ -456,6 +487,37 @@ async function confirmIncomingGhostStillNeeded(target: { runId: string; nodeId: 
       return
     }
     if (isApproveStillStarting(run, nodeId)) return
+
+    // Parked but maybe filtered out of loadList — pin the real pending row
+    // and keep armed so later filtered loadList passes still merge it (g2.1).
+    if (isApproveAwaitingHuman(run, nodeId)) {
+      try {
+        const data = await api.listGates({ page: 1, pageSize: 100 })
+        if (!incomingArmed.value) return
+        const curAfter = incomingTarget()
+        if (!curAfter || `${curAfter.runId}:${curAfter.nodeId || 'grasp'}` !== key) return
+        const rows = isPaginated(data) ? data.items : data
+        const hit = rows.find((it) => it.runId === target.runId)
+        if (hit) {
+          incomingGhost.value = hit
+          const hitKey = itemKey(hit)
+          if (!listItems.value.some((it) => itemKey(it) === hitKey)) {
+            const withoutStartingGhost = listItems.value.filter(
+              (it) => !(it.runId === target.runId && isStartingInboxItem(it)),
+            )
+            listItems.value = [hit, ...withoutStartingGhost]
+            listTotal.value = Math.max(listTotal.value, listItems.value.length)
+          }
+          if (!processingLock.value) ensureValidActive()
+          return
+        }
+      } catch {
+        // Transient unfiltered peek failure: keep the ghost; next load retries.
+      }
+      // Still pending but not yet listed — keep armed so the deep link stays.
+      return
+    }
+
     incomingArmed.value = false
     incomingGhost.value = null
     queryWaitGen++ // stop waitForQueryItem from polling a dead deep link
@@ -646,9 +708,16 @@ async function waitForQueryItem() {
     if (gen !== queryWaitGen) return
     if (selectFromQuery()) applyHomeHandoff()
     else selectFromHandoff()
-    // Done once the real row is selected, or once a starting card is up and the
-    // bounded starting poll owns the rest of the wait (no second loop).
-    if (active.value && (!incomingGhost.value || activeStarting.value)) return
+    // Done once the real row is selected, a starting card is up (bounded poll
+    // owns the rest), or a parked deep-link pin replaced the starting ghost.
+    if (
+      active.value &&
+      (!incomingGhost.value ||
+        activeStarting.value ||
+        !isStartingInboxItem(incomingGhost.value))
+    ) {
+      return
+    }
     await new Promise((r) => setTimeout(r, 400))
     if (gen !== queryWaitGen) return
     await loadList()
@@ -1546,7 +1615,7 @@ const clarifyComposerIteration = computed(() => activeClarify.value?.iteration ?
 const clarifyComposerTurns = computed(() => activeClarify.value?.turns ?? [])
 const clarifyComposerDone = computed(() => activeClarify.value?.done ?? false)
 const clarifyComposerNodeType = computed(
-  () => inboxStageNodeType.value || (activeHomeSeed.value ? 'approve' : ''),
+  () => inboxStageNodeType.value || (activeHomeSeed.value ? 'grasp' : ''),
 )
 
 const inboxClarifyStageKind = computed(() => (activeRunLoadError.value ? 'loadFailed' : 'pending'))
@@ -1642,7 +1711,11 @@ async function onResolve(action: string, form: Record<string, any> = {}) {
   const submittedKey = itemKey(g)
   const submittedItem = g
   const prevList = listItems.value.slice()
-  // Leave pending at confirm initiation — do not wait for resume/network (plan g1.2).
+  const positive = action === 'pass' || action === 'approve'
+  // Leave pending at confirm click — do not wait for resume/network (plan g1.2).
+  // Positive path: start page-level overlay on click (g1.1); do not await before leave.
+  // Page-level host survives selectActiveAfterRemove / shell remount (g1.2).
+  if (positive) void playInboxConfirmFlowCeremony()
   removeListItemLocally(submittedKey)
   selectActiveAfterRemove(prevList, submittedKey)
   if (!active.value) {
@@ -1652,6 +1725,8 @@ async function onResolve(action: string, form: Record<string, any> = {}) {
   try {
     await api.resumeGate(g.runId, g.nodeId, action, form)
   } catch {
+    confirmFlowDeskHold.value = false
+    inboxConfirmFlow.reset()
     restoreListItemLocally(submittedItem, prevList)
     rollbackProcessingIntent(submittedItem)
     // Reclaim for retry unless a newer neighbor confirm already owns the selection.
@@ -1739,8 +1814,9 @@ async function onClarifySend(
   const prevList = force ? listItems.value.slice() : null
   if (force) {
     beginProcessingIntent(it)
-    // Leave pending as soon as confirm is initiated (收尾人话 / confirming mid-state).
-    // Do not wait for reactReply — Approve wrap-up can take far longer than ~3s.
+    // Click intent: play overlay + leave pending before wrap-up HTTP (plan g1.1 / g1.2).
+    // Page-level host (not chat inject / shell remount) — do not await reactReply.
+    void playInboxConfirmFlowCeremony()
     removeListItemLocally(submittedKey)
     selectActiveAfterRemove(prevList!, submittedKey)
     if (!active.value) {
@@ -1776,6 +1852,8 @@ async function onClarifySend(
     if (force) {
       // Align with RunDetail: bottom status bar, not toast.
       clarifyConfirmError.value = msg
+      confirmFlowDeskHold.value = false
+      inboxConfirmFlow.reset()
       restoreListItemLocally(submittedItem, prevList!)
       rollbackProcessingIntent(submittedItem)
       // Reclaim for retry unless a newer neighbor confirm already owns the selection.
@@ -1911,6 +1989,8 @@ onUnmounted(() => {
   window.removeEventListener('focus', onFocus)
   closeActiveRunWs()
   for (const triple of [...inboxContextAborts.keys()]) abortInboxContext(triple)
+  confirmFlowDeskHold.value = false
+  inboxConfirmFlow.reset()
 })
 
 function itemTitle(it: InboxItem) {
@@ -2027,7 +2107,13 @@ function itemSecondary(it: InboxItem) {
     listScrollTop,
     listEl,
     gateApprovalRef,
+    reviewShellRef,
     reviewChatRef,
+    confirmFlowDeskHold,
+    inboxConfirmFlow,
+    inboxConfirmFlowPhase: inboxConfirmFlow.phase,
+    inboxConfirmFlowReduce: inboxConfirmFlow.reduceMotion,
+    inboxConfirmFlowToken: inboxConfirmFlow.playToken,
     pendingAcpFrames,
     projectFilterOpen,
     pipelineFilterOpen,
