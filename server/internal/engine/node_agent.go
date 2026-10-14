@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -41,6 +42,10 @@ func (e *Engine) execAgent(c *execCtx, node *models.Node) nodeOutcome {
 func (e *Engine) runAutoAgent(c *execCtx, node *models.Node) nodeOutcome {
 	req := e.nodeReq(c, node)
 	res, err := e.provider.RunAgent(context.Background(), req)
+	if errors.Is(err, runtime.ErrCodexLoginRejected) {
+		return nodeOutcome{status: "failed", err: err.Error(), outputMd: "Agent 执行失败:" + err.Error(),
+			events: res.Events, usage: res.Usage, usageByModel: res.UsageByModel}
+	}
 	if err != nil {
 		return nodeOutcome{status: "failed", err: err.Error(),
 			outputMd: "Agent 执行失败:" + err.Error(), retryable: true, events: res.Events, usage: res.Usage, usageByModel: res.UsageByModel}

@@ -3,6 +3,7 @@ package runtime
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/cocofhu/grasp/internal/envauth"
 	"github.com/cocofhu/grasp/internal/models"
+	"github.com/cocofhu/grasp/internal/sandbox"
 )
 
 const (
@@ -21,6 +23,11 @@ const (
 	// CodexLoginRepasteMessage is the user-facing failure when Codex rejects
 	// or cannot refresh the login file. It must not include the file body.
 	CodexLoginRepasteMessage = "Codex 登录已失效或无法刷新，请重新粘贴登录文件（~/.codex/auth.json）"
+	// CodexLoginRepasteMark is the stable phrase that identifies the re-paste
+	// message. The engine (no auto-retry), the web failure banner (credentials
+	// link) and the sandbox gateway's rewritten message all key on it, so any
+	// copy change must keep it.
+	CodexLoginRepasteMark = "请重新粘贴登录文件"
 )
 
 var (
@@ -31,7 +38,51 @@ var (
 	// ErrCodexLoginFileMissing is returned before the CLI starts when the project
 	// has no Codex login file.
 	ErrCodexLoginFileMissing = errors.New("缺少 Codex 登录文件：请在项目凭据中粘贴 ChatGPT 登录文件（本机 ~/.codex/auth.json）")
+	// ErrCodexLoginRejected marks a node attempt whose Codex login was refused
+	// or could not be refreshed. Retrying cannot help until the user re-pastes
+	// the login file, so callers must not auto-retry it.
+	ErrCodexLoginRejected = errors.New(CodexLoginRepasteMessage)
 )
+
+// codexLoginErr keeps the original error text while matching
+// ErrCodexLoginRejected, for errors that already carry the re-paste message.
+type codexLoginErr struct{ err error }
+
+func (e *codexLoginErr) Error() string   { return e.err.Error() }
+func (e *codexLoginErr) Unwrap() []error { return []error{ErrCodexLoginRejected, e.err} }
+
+// asCodexLoginErr makes err match ErrCodexLoginRejected; nil becomes the bare
+// sentinel.
+func asCodexLoginErr(err error) error {
+	switch {
+	case err == nil:
+		return ErrCodexLoginRejected
+	case errors.Is(err, ErrCodexLoginRejected):
+		return err
+	case strings.Contains(err.Error(), CodexLoginRepasteMessage):
+		return &codexLoginErr{err: err}
+	default:
+		return fmt.Errorf("%w: %w", ErrCodexLoginRejected, err)
+	}
+}
+
+// codexTurnLoginErr returns ErrCodexLoginRejected when a finished Codex turn
+// failed because the CLI login was refused, keeping the CLI error body when it
+// says more than the re-paste message. Other turns return nil. Only the turn's
+// failure body is checked, never narration or tool output.
+func (c *acpProvider) codexTurnLoginErr(res *sandbox.ChatResult) error {
+	if c.backend != BackendCodex {
+		return nil
+	}
+	fail := chatFailure(res)
+	if fail == "" || !IsCodexAuthRejectionText(fail) {
+		return nil
+	}
+	if fail == CodexLoginRepasteMessage {
+		return ErrCodexLoginRejected
+	}
+	return fmt.Errorf("%w: %s", ErrCodexLoginRejected, fail)
+}
 
 // ValidateCodexLoginFile accepts a ChatGPT login file and rejects blank
 // content, a raw API key, and a file marked as API-key mode. Other non-empty
@@ -169,7 +220,7 @@ func IsCodexAuthRejectionText(text string) bool {
 	if s == "" {
 		return false
 	}
-	if strings.Contains(text, CodexLoginRepasteMessage) || strings.Contains(s, "请重新粘贴登录文件") {
+	if strings.Contains(text, CodexLoginRepasteMessage) || strings.Contains(s, CodexLoginRepasteMark) {
 		return true
 	}
 	phrases := []string{
