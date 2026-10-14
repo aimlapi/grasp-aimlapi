@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import HomeParticleMeshBackground from '@/components/dashboard/HomeParticleMeshBackground.vue'
+import HomeYumeCharacter from '@/components/dashboard/HomeYumeCharacter.vue'
 import HomeWorkflowSelect from '@/components/dashboard/HomeWorkflowSelect.vue'
 import HomePrioritySelect from '@/components/dashboard/HomePrioritySelect.vue'
 import Icon from '@/components/ui/Icon.vue'
@@ -14,15 +15,12 @@ import { useChatImagePreview } from '@/lib/composables/useChatImagePreview'
 import { useHomeApproveChat } from '@/lib/run/useHomeApproveChat'
 import { attachmentDisplayName, isImageAttachment } from '@/lib/shared/attachments'
 import { imgSrc } from '@/lib/shared/compositeText'
-import { useBrandSettings } from '@/lib/composables/useBrandSettings'
 import type { Workflow } from '@/lib/shared/types'
 
 const { preview: imagePreview, openChatImagePreview, closeChatImagePreview } = useChatImagePreview()
 
 const router = useRouter()
 const { t, tm } = useI18n()
-const { productName, homeSubtitle } = useBrandSettings()
-const effectiveSubtitle = computed(() => homeSubtitle.value || String(t('pages.dashboard.title')))
 const {
   projectId,
   homeWorkflows,
@@ -60,11 +58,6 @@ const {
   onLaunchStarted,
 } = useHomeApproveChat()
 
-const brandVisible = ref('')
-/** Keep caret in layout; hide with opacity so settle does not shift the centered brand. */
-const brandCursorGone = ref(false)
-const brandCursorBlink = ref(false)
-const brandTimers: ReturnType<typeof setTimeout>[] = []
 const composerFocused = ref(false)
 const composing = ref(false)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
@@ -112,45 +105,6 @@ const showPhTypewriter = computed(() => !draft.value.trim() && !composerFocused.
 function prefersReducedMotion(): boolean {
   if (typeof window === 'undefined' || !window.matchMedia) return false
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
-}
-
-function clearBrandTimers() {
-  while (brandTimers.length) {
-    const id = brandTimers.pop()
-    if (id != null) clearTimeout(id)
-  }
-}
-
-function scheduleBrand(fn: () => void, ms: number) {
-  brandTimers.push(setTimeout(fn, ms))
-}
-
-/** Monospace brand: type once, soft blink caret, then opacity-hide caret (keep box). */
-function runBrandTypewriter() {
-  clearBrandTimers()
-  brandCursorBlink.value = false
-  brandCursorGone.value = false
-  if (prefersReducedMotion()) {
-    brandVisible.value = productName.value
-    brandCursorGone.value = true
-    return
-  }
-  brandVisible.value = ''
-  let i = 0
-  const typeNext = () => {
-    if (i < productName.value.length) {
-      i += 1
-      brandVisible.value = productName.value.slice(0, i)
-      scheduleBrand(typeNext, 78)
-      return
-    }
-    brandCursorBlink.value = true
-    scheduleBrand(() => {
-      brandCursorBlink.value = false
-      brandCursorGone.value = true
-    }, 850 * 3)
-  }
-  scheduleBrand(typeNext, 220)
 }
 
 function clearPhTimers() {
@@ -548,7 +502,6 @@ function openFilePicker() {
 }
 
 watch(draft, () => nextTick(autoGrow))
-watch(productName, () => runBrandTypewriter(), { immediate: true })
 watch(showPhTypewriter, () => runPlaceholderTypewriter(), { immediate: true })
 watch(placeholderLines, () => {
   if (showPhTypewriter.value) runPlaceholderTypewriter()
@@ -587,7 +540,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  clearBrandTimers()
   clearPhTimers()
   clearLongPress()
   clearWorkflowNavHold()
@@ -604,25 +556,16 @@ onBeforeUnmount(() => {
   <div data-testid="dashboard-view" class="home-shell relative flex h-full min-h-0 flex-col">
     <HomeParticleMeshBackground />
     <div
-      class="home-shell__content relative z-[1] mx-auto flex w-full max-w-3xl min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-10"
+      class="home-shell__content relative z-[1] mx-auto flex w-full max-w-3xl min-h-0 flex-1 flex-col items-center justify-start overflow-y-auto px-4 py-10"
     >
-      <h1 class="home-brand" data-testid="home-brand" :aria-label="productName">
-        <span class="home-brand__text" data-testid="home-brand-text">{{ brandVisible }}</span>
-        <span
-          class="home-brand__cursor"
-          :class="{
-            'home-brand__cursor--blink': brandCursorBlink,
-            'home-brand__cursor--gone': brandCursorGone,
-          }"
-          data-testid="home-brand-cursor"
-          aria-hidden="true"
-        />
-      </h1>
-      <p class="home-hint mt-[18px] text-center" data-testid="home-title">
-        {{ effectiveSubtitle }}
-      </p>
+      <div class="home-brand-block" data-testid="home-brand-block">
+        <HomeYumeCharacter />
+        <p class="home-hero-copy" data-testid="home-hero-copy">
+          <span class="em">先说清</span>，再动手
+        </p>
+      </div>
 
-      <div class="mt-[30px] w-full">
+      <div class="home-composer-wrap w-full">
         <p
           v-if="attachNotice"
           class="mb-2 rounded border border-err/40 bg-err/10 px-3 py-1.5 text-[12px] text-err"
@@ -1011,57 +954,40 @@ onBeforeUnmount(() => {
   isolation: isolate;
 }
 
-/* g1.1 — monospace brand; solid color; letter-spacing matches design */
-.home-brand {
-  display: inline-flex;
-  align-items: baseline;
-  margin: 0;
-  min-height: 1.1em;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
-  font-size: clamp(2.5rem, 8.5vw, 4.25rem);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  line-height: 1.05;
-  color: rgb(var(--c-txt));
-}
-
-.home-brand__text {
-  white-space: pre;
-}
-
-.home-brand__cursor {
-  display: inline-block;
-  width: 0.08em;
-  height: 0.92em;
-  margin-left: 0.06em;
-  vertical-align: -0.06em;
+/* brand: fill LOCKED — cropped yume + copy; no wordmark / logo-mark */
+.home-brand-block {
+  --yume-w: 240px;
+  --yume-h: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   flex-shrink: 0;
-  background: rgb(var(--c-accent));
-  opacity: 1;
-  transition: opacity 0.2s ease;
+  width: 100%;
 }
 
-.home-brand__cursor--blink {
-  animation: home-brand-caret 0.85s steps(1) 3;
-}
-
-.home-brand__cursor--gone {
-  opacity: 0;
-}
-
-.home-hint {
-  font-size: 14px;
+.home-hero-copy {
+  margin-top: 6px; /* after crop; optical ~4-6px */
+  font-size: 17px;
   font-weight: 500;
-  letter-spacing: 0.01em;
-  color: rgb(var(--c-txt2));
-  opacity: 0;
-  animation: home-hint-in 0.45s ease-out 0.15s forwards;
+  letter-spacing: 0.04em;
+  color: #9a9a9a;
+  text-align: center;
+  line-height: 1.45;
+  position: relative;
+  z-index: 1;
 }
 
-@keyframes home-hint-in {
-  to {
-    opacity: 1;
-  }
+.home-hero-copy .em {
+  color: #f2f2f2;
+  font-weight: 600;
+}
+
+:global(html.light) .home-hero-copy {
+  color: #6b6b6b;
+}
+
+:global(html.light) .home-hero-copy .em {
+  color: #1a1a1a;
 }
 
 /* plan g1.1 — shell/hero composer 16px; overflow+bg+radius same layer */
@@ -1368,17 +1294,6 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
-@keyframes home-brand-caret {
-  0%,
-  49% {
-    opacity: 1;
-  }
-  50%,
-  100% {
-    opacity: 0;
-  }
-}
-
 @keyframes home-ph-caret {
   0%,
   49% {
@@ -1392,16 +1307,6 @@ onBeforeUnmount(() => {
 
 /* g1.3 / g2.3 — prefers-reduced-motion */
 @media (prefers-reduced-motion: reduce) {
-  .home-hint {
-    animation: none !important;
-    opacity: 1;
-  }
-
-  .home-brand__cursor {
-    opacity: 0 !important;
-    animation: none !important;
-  }
-
   .home-composer__ph-cursor {
     animation: none;
     opacity: 1;
@@ -1428,6 +1333,11 @@ onBeforeUnmount(() => {
   }
 }
 
+/* fill LOCKED: copy to composer 22px; yume 240x200 */
+.home-composer-wrap {
+  margin-top: 22px;
+}
+
 @media (max-width: 640px) {
   .home-workflow-nav--prev {
     left: 0;
@@ -1442,8 +1352,7 @@ onBeforeUnmount(() => {
   .home-shell__content {
     padding-top: 4.25rem;
     padding-bottom: 2.5rem;
-    justify-content: flex-start;
   }
-
 }
+
 </style>

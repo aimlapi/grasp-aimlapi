@@ -54,16 +54,33 @@ describe('DashboardView home chat layout', () => {
     expect(particleBgSrc).toMatch(/pointer-events:\s*none/)
   })
 
-  // plan g1.2 / g1.3 — monospace Grasp, no gradient shimmer / staggered / serif accent
-  it('uses local monospace brand without banned brand effects', () => {
-    expect(src).toMatch(/data-testid="home-brand"/)
-    expect(src).toMatch(/ui-monospace/)
-    expect(src).toMatch(/home-brand__cursor/)
+  // fill LOCKED — cropped yume + copy (no wordmark / logo-mark / old hint)
+  it('uses fill hero with yume crop, copy, and no banned effects', () => {
+    expect(src).toMatch(/data-testid="home-brand-block"/)
+    expect(src).toMatch(/HomeYumeCharacter/)
+    expect(src).toMatch(/data-testid="home-hero-copy"/)
+    expect(src).toMatch(/home-hero-copy/)
+    expect(src).toMatch(/class="em"/)
+    expect(src).not.toMatch(/data-testid="home-brand"/)
+    expect(src).not.toMatch(/data-testid="home-brand-row"/)
+    expect(src).not.toMatch(/data-testid="home-brand-copy"/)
+    expect(src).not.toMatch(/data-testid="home-logo-mark"/)
+    expect(src).not.toMatch(/data-testid="home-title"/)
+    expect(src).not.toMatch(/class="home-hint"/)
+    expect(src).not.toMatch(/logo-mark\.svg/)
+    expect(src).not.toMatch(/HomeLogoEasterEgg|homeLogoJumpGame|home-logo-easter-egg/)
+    expect(src).not.toMatch(/home-brand__cursor/)
+    expect(src).not.toMatch(/ui-monospace/)
+    expect(src).toMatch(/--yume-w:\s*240px/)
+    expect(src).toMatch(/--yume-h:\s*200px/)
+    expect(src).not.toMatch(/--yume-size/)
+    expect(src).toMatch(/margin-top:\s*6px/)
+    expect(src).toMatch(/\.home-composer-wrap\s*\{[^}]*margin-top:\s*22px/s)
+    expect(src).toMatch(/justify-start/)
     expect(src).not.toMatch(/var\(--grad-logo\)/)
     expect(src).not.toMatch(/background-clip:\s*text/)
     expect(src).not.toMatch(/shimmer/)
     expect(src).not.toMatch(/stagger/)
-    expect(src).not.toMatch(/serif/)
     expect(src).not.toMatch(/fonts\.googleapis|fonts\.gstatic|cdn\.jsdelivr/)
   })
 
@@ -88,8 +105,10 @@ describe('DashboardView home chat layout', () => {
   })
 
   // review — 无 subtitle；工作流卡片脱离全局 .card；圆角 Token 12px
-  it('omits home-subtitle and uses rounded workflow cards', () => {
+  it('omits home-subtitle/hint and uses rounded workflow cards', () => {
     expect(src).not.toMatch(/data-testid="home-subtitle"/)
+    expect(src).not.toMatch(/data-testid="home-title"/)
+    expect(src).not.toMatch(/home-hint/)
     expect(src).toMatch(/class="home-shell__card[^"]*border border-line/)
     expect(src).not.toMatch(/class="[^"]*\bcard\b[^"]*home-shell__card|class="home-shell__card[^"]*\bcard\b/)
     expect(src).toMatch(/\.home-shell__card\s*\{[^}]*border-radius:\s*12px/s)
@@ -104,10 +123,11 @@ describe('DashboardView home chat layout', () => {
 
   // plan g2 / g3 — no filter hint; caret opacity settle; placeholder typewriter
   // plan g1.1 / g2.2 — Ctrl/Meta+Enter send (no shiftKey-only Enter-to-send)
-  it('omits filter hint and keeps caret settle + placeholder typewriter', () => {
+  it('omits filter hint and keeps placeholder typewriter', () => {
     expect(src).not.toMatch(/data-testid="home-filter-hint"/)
     expect(src).not.toMatch(/filterHint/)
-    expect(src).toMatch(/home-brand__cursor--gone/)
+    expect(src).not.toMatch(/home-brand__cursor/)
+    expect(src).not.toMatch(/brandCursorGone/)
     expect(src).toMatch(/data-testid="home-composer-placeholder"/)
     expect(src).toMatch(/ctrlKey\s*\|\|\s*e\.metaKey|e\.metaKey\s*\|\|\s*e\.ctrlKey/)
     expect(src).toMatch(/sendShortcut/)
@@ -151,21 +171,18 @@ describe('DashboardView home chat layout', () => {
     expect(shellSrc).toMatch(/min-h-0 flex-1/)
   })
 
-  // plan g1.1 / g2.1 — mobile top spacing: ~4–4.5rem padding-top, keep flex-start
+  // fill LOCKED — top-down shell (justify-start); mobile keeps ~4.25rem padding-top
   it('uses moderate mobile top padding without vertical centering', () => {
+    expect(src).toMatch(/home-shell__content[^"]*justify-start/)
     expect(src).toMatch(
       /@media \(max-width: 520px\)[\s\S]*\.home-shell__content[\s\S]*padding-top:\s*4\.25rem/,
     )
     expect(src).not.toMatch(
       /@media \(max-width: 520px\)[\s\S]*\.home-shell__content[\s\S]*padding-top:\s*2rem/,
     )
-    expect(src).toMatch(
-      /@media \(max-width: 520px\)[\s\S]*\.home-shell__content[\s\S]*justify-content:\s*flex-start/,
-    )
     expect(src).not.toMatch(
       /@media \(max-width: 520px\)[\s\S]*\.home-shell__content[\s\S]*justify-content:\s*center/,
     )
-    expect(src).toMatch(/justify-center/)
   })
 
   // plan g1.2 — keep overflow-hidden on composer; priority panel teleports instead
