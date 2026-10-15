@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/cocofhu/grasp/internal/mcp"
@@ -242,12 +243,66 @@ func (e *Engine) setRunBranch(c *execCtx, git *runtime.GitInfo) {
 // (JSON name→branch map), so downstream sandboxes check the implementation
 // out instead of cloning the default branch.
 func (e *Engine) exportBranchVar(c *execCtx, outputs map[string]any) {
-	br := strings.TrimSpace(str(outputs["branches"]))
+	br := encodeBranchesVar(outputs["branches"])
 	if br == "" {
 		return
 	}
 	c.setVar("branches", br)
 	e.persistVar(c.run.ID, "branches", br)
+}
+
+// encodeBranchesVar normalizes outputs.branches to the JSON name→branch map
+// downstream clones parse. Git capture stores a JSON string, but an agent's
+// node_complete outputs replace it with a decoded object; fmt.Sprint of that
+// map ("map[repo:branch]") is unparseable and silently clones the default
+// branch. Returns "" when nothing usable is present.
+func encodeBranchesVar(v any) string {
+	m := map[string]string{}
+	switch t := v.(type) {
+	case string:
+		s := strings.TrimSpace(t)
+		if s == "" || json.Unmarshal([]byte(s), &m) != nil {
+			return ""
+		}
+	case map[string]string:
+		for k, b := range t {
+			m[k] = b
+		}
+	case map[string]any:
+		for k, b := range t {
+			if s, ok := b.(string); ok {
+				m[k] = s
+			}
+		}
+	default:
+		return ""
+	}
+	// Keys that collide once trimmed resolve deterministically: an already
+	// trimmed key wins, otherwise the first in sorted order.
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	clean := make(map[string]string, len(m))
+	for _, k := range keys {
+		k2, b2 := strings.TrimSpace(k), strings.TrimSpace(m[k])
+		if k2 == "" || b2 == "" {
+			continue
+		}
+		if _, taken := clean[k2]; taken && k != k2 {
+			continue
+		}
+		clean[k2] = b2
+	}
+	if len(clean) == 0 {
+		return ""
+	}
+	out, err := json.Marshal(clean)
+	if err != nil {
+		return ""
+	}
+	return string(out)
 }
 
 // exportPreflightVars writes each preflight.json field name→value (plaintext,
