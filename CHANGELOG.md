@@ -4,6 +4,9 @@ All notable public-release changes are documented here.
 
 ## Unreleased
 
+- **App preview:** the "may be stuck" warning now appears after 60 seconds of
+  connecting instead of 20, matching the advertised 30–60 second first launch.
+  The "please wait" hint is hidden once the warning shows (#802).
 - **Run canvas handoff:** traversed-edge handoffs are now a compact "⇄ 交接"
   icon chip instead of a truncated slice of the text. Opening it shows a card
   above the nodes with the "source → target" route, the handoff rendered as
