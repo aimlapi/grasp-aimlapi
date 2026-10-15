@@ -4,6 +4,13 @@ All notable public-release changes are documented here.
 
 ## Unreleased
 
+- **Run canvas handoff:** a node with post-run review (e.g. the 实现 node) no
+  longer loses its handoff when the reviewer clicks「确认并流转」. The handoff
+  and its source are preserved through review confirm, revise refresh, and
+  clarify/react resume, and the platform fallback still writes one when a node
+  with a downstream left none. The「实现 → 测试评审」edge shows the handoff chip
+  again and the downstream prompt gets the upstream handoff, including after a
+  test-fail loop-back (#796 follow-up).
 - **App preview:** the "may be stuck" warning now appears after 60 seconds of
   connecting instead of 20, matching the advertised 30–60 second first launch.
   The "please wait" hint is hidden once the warning shows (#802).
