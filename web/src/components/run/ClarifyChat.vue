@@ -3,7 +3,6 @@ import Icon from '../ui/Icon.vue'
 import ChatImageThumb from '../ui/ChatImageThumb.vue'
 import ChatImagePreviewModal from '../ui/ChatImagePreviewModal.vue'
 import ComposerShell from './ComposerShell.vue'
-import AppModal from '../ui/AppModal.vue'
 import ClarifyDemoFrame from './ClarifyDemoFrame.vue'
 import ThoughtSummaryStatus from './ThoughtSummaryStatus.vue'
 import InboxMotionMark from '@/components/inbox/InboxMotionMark.vue'
@@ -13,14 +12,20 @@ import StreamMarkdown from './StreamMarkdown.vue'
 import AnnotationChip from './AnnotationChip.vue'
 import LiveVariantCard from './LiveVariantCard.vue'
 import PendingSendQueuePanel from './PendingSendQueuePanel.vue'
-import { computed, inject, nextTick, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
+import {
+  isClarifyDemoEscapeMessage,
+  placeClarifyDemoWindow,
+  withDemoEscapeBridge,
+  type DemoWindowBox,
+} from '@/lib/inbox/clarifyDemoWindow'
+import { EMBED_DEMO_PREVIEW_KEY } from '@/lib/inbox/embedDemoPreview'
 import { EMBED_IMAGE_PREVIEW_KEY } from '@/lib/inbox/embedImagePreview'
 import { LIVE_CARD_HOST, isLiveBusy } from '@/lib/inbox/liveVariants'
 import type {
   ClarifyTurn,
   ClarifyImage,
   ReactAnnotation,
-  ReactOption,
   ReactQuestion,
 } from '@/lib/shared/types'
 import { isImageAttachment, attachmentDisplayName } from '@/lib/shared/attachments'
@@ -248,6 +253,9 @@ const {
   relTime,
   demoGridColsClass,
   demoOptionsOf,
+  selectedDemoForInteractive,
+  selectedDemoOption,
+  useSideBySide,
   queueNotice,
   queueToast,
   hasComposerDraft,
@@ -257,8 +265,9 @@ const {
 } = chat
 
 const embedImagePreview = inject(EMBED_IMAGE_PREVIEW_KEY, null)
+const embedDemoPreview = inject(EMBED_DEMO_PREVIEW_KEY, null)
 
-/** Page Harness keeps the preview on the host page. The main app still opens AppModal here. */
+/** Page Harness keeps the preview on the host page. The main app opens a page-level window beside the chat. */
 function openImagePreview(images: ClarifyImage[], index: number) {
   if (!embedImagePreview) {
     chat.openImagePreview(images, index)
@@ -301,71 +310,145 @@ const liveSettled = (sid: string) => {
   const state = liveHost?.store.sessions[sid]?.state
   return !!state && !isLiveBusy(state)
 }
-type PreviewWall = {
+type PreviewFocus = {
   question: ReactQuestion
-  focusId: string
+  optionId: string
   readonly: boolean
   turnIndex: number
 }
 
-const previewWall = ref<PreviewWall | null>(null)
+/** One enlarged frame. Opening or closing it does not change the draft selection. */
+const previewFocus = ref<PreviewFocus | null>(null)
+const chatRoot = ref<HTMLElement | null>(null)
+const demoWindowEl = ref<HTMLElement | null>(null)
+const demoBox = ref<DemoWindowBox | null>(null)
+const demoWindowTitleId = `clarify-demo-window-title-${useId().replace(/:/g, '')}`
 
 function hasDemoHtml(o: { demoHtml?: string } | undefined): boolean {
   return !!o?.demoHtml?.trim()
 }
 
-const wallDemos = computed(() => (previewWall.value ? demoOptionsOf(previewWall.value.question) : []))
-const wallGridClass = computed(() => demoGridColsClass(wallDemos.value.length || 1))
+const focusedOption = computed(() => {
+  const focus = previewFocus.value
+  if (!focus) return null
+  const option = focus.question.options.find((o) => o.id === focus.optionId)
+  return hasDemoHtml(option) ? option! : null
+})
 
-function previewOptionSelector(optionId: string): string {
-  const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(optionId) : optionId
-  return `[data-preview-option="${escaped}"]`
-}
-
-function scrollPreviewIntoView(optionId: string) {
-  void nextTick(() => {
-    const node = document.querySelector(previewOptionSelector(optionId))
-    if (node instanceof HTMLElement && typeof node.scrollIntoView === 'function') {
-      node.scrollIntoView({ block: 'nearest' })
-    }
-  })
-}
-
-/** Open the shared enlarge window for one question. Does not change the selection. */
-function openPreviewWall(q: ReactQuestion, optionId: string, readonly: boolean, turnIndex: number) {
-  previewWall.value = { question: q, focusId: optionId, readonly, turnIndex }
-  scrollPreviewIntoView(optionId)
-}
-
-function closePreviewWall() {
-  previewWall.value = null
-}
-
-function wallSelected(o: ReactOption): boolean {
-  const wall = previewWall.value
-  if (!wall) return false
-  if (wall.readonly) {
-    return selectedLabelsForQuestion(wall.question, choiceRowsForAgentTurn(wall.turnIndex)).includes(o.label)
+const focusedHighlighted = computed(() => {
+  const focus = previewFocus.value
+  const option = focusedOption.value
+  if (!focus || !option) return false
+  if (focus.readonly) {
+    return selectedLabelsForQuestion(focus.question, choiceRowsForAgentTurn(focus.turnIndex)).includes(option.label)
   }
-  return isSelected(wall.question.id, o.id)
+  return isSelected(focus.question.id, option.id)
+})
+
+const focusedTitle = computed(() => {
+  const base = translate('common.htmlPreview.enlargeTitle')
+  const label = focusedOption.value?.label?.trim()
+  return label ? `${base} · ${label}` : base
+})
+
+/** Main-app window only. CoCo draws its own host window and must not get a second layer here. */
+const showDemoWindow = computed(() => !!focusedOption.value && !embedDemoPreview)
+
+const windowDemoHtml = computed(() => withDemoEscapeBridge(focusedOption.value?.demoHtml || ''))
+
+const demoWindowStyle = computed(() => {
+  const box = demoBox.value
+  if (!box) return undefined
+  return {
+    left: `${box.x}px`,
+    top: `${box.y}px`,
+    width: `${box.w}px`,
+    height: `${box.h}px`,
+  }
+})
+
+function layoutDemoWindow() {
+  const rect = chatRoot.value?.getBoundingClientRect()
+  const vw = window.innerWidth || document.documentElement?.clientWidth || 0
+  const vh = window.innerHeight || document.documentElement?.clientHeight || 0
+  demoBox.value = placeClarifyDemoWindow(
+    { w: vw, h: vh },
+    { x: rect?.left ?? 0, y: rect?.top ?? 0, w: rect?.width ?? 0, h: rect?.height ?? 0 },
+  )
 }
 
-function onWallPick(o: ReactOption) {
-  const wall = previewWall.value
-  if (!wall || wall.readonly) return
-  if (!isActiveTurn(wall.turnIndex) || curQuestion.value?.id !== wall.question.id) return
-  pick(wall.question, o.id)
+function onDemoKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape' && event.key !== 'Esc') return
+  event.preventDefault()
+  closePreviewFocus()
+}
+
+function onDemoEscapeMessage(event: MessageEvent) {
+  if (!isClarifyDemoEscapeMessage(event.data)) return
+  const frame = demoWindowEl.value?.querySelector('iframe')
+  if (frame && event.source !== frame.contentWindow) return
+  closePreviewFocus()
+}
+
+function onDemoWindowResize() {
+  if (showDemoWindow.value) layoutDemoWindow()
+}
+
+function attachDemoWindowListeners() {
+  window.addEventListener('keydown', onDemoKeydown)
+  window.addEventListener('message', onDemoEscapeMessage)
+  window.addEventListener('resize', onDemoWindowResize)
+}
+
+function detachDemoWindowListeners() {
+  window.removeEventListener('keydown', onDemoKeydown)
+  window.removeEventListener('message', onDemoEscapeMessage)
+  window.removeEventListener('resize', onDemoWindowResize)
+}
+
+/** Open this one frame. A later open replaces the same window. */
+function openPreviewFocus(q: ReactQuestion, optionId: string, readonly: boolean, turnIndex: number) {
+  const option = q.options.find((o) => o.id === optionId)
+  if (!hasDemoHtml(option)) return
+  previewFocus.value = { question: q, optionId, readonly, turnIndex }
+  if (embedDemoPreview) {
+    embedDemoPreview.open(option!.demoHtml || '', option!.label)
+    return
+  }
+  layoutDemoWindow()
+}
+
+function closePreviewFocus() {
+  previewFocus.value = null
+  embedDemoPreview?.close()
 }
 
 /** Leave the window when the deck moves, the round is submitted, or the live card goes away. */
 watch(
   () => `${activeQuestions.value.map((q) => q.id).join('|')}@${step.value}@${thinking.value ? 1 : 0}`,
   () => {
-    if (previewWall.value) closePreviewWall()
+    if (previewFocus.value) closePreviewFocus()
   },
 )
 
+watch(showDemoWindow, (open) => {
+  if (!open) {
+    detachDemoWindowListeners()
+    return
+  }
+  layoutDemoWindow()
+  attachDemoWindowListeners()
+  void nextTick(() => {
+    demoWindowEl.value?.querySelector<HTMLElement>('[data-testid="clarify-demo-window-close"]')?.focus()
+  })
+})
+
 /** The newest request keeps only a loading headline until the agent stops working on it. */
+onBeforeUnmount(() => {
+  detachDemoWindowListeners()
+  if (previewFocus.value) closePreviewFocus()
+})
+
 function humanLiveCardLoading(live: NonNullable<ClarifyTurn['live']>, i: number) {
   if (liveCards.value.newest.get(live.sid) !== i || live.op === 'accept' || live.op === 'discard') return false
   return isLiveBusy(liveHost?.store.sessions[live.sid]?.state)
@@ -378,7 +461,7 @@ function humanLiveCardLoading(live: NonNullable<ClarifyTurn['live']>, i: number)
     Bake min-h-0 flex-1 so page-control status + this column share shell height
     and shrink-0 confirm footer is not clipped (plan g1.3).
   -->
-  <div class="flex h-full min-h-0 flex-1 flex-col" data-review-composer>
+  <div ref="chatRoot" class="flex h-full min-h-0 flex-1 flex-col" data-review-composer>
     <div class="relative flex min-h-0 flex-1 flex-col">
     <div
       ref="scroller"
@@ -747,7 +830,7 @@ function humanLiveCardLoading(live: NonNullable<ClarifyTurn['live']>, i: number)
                             type="button"
                             class="inline-flex shrink-0 items-center gap-0.5 self-center rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] text-txt2 transition-colors hover:text-txt"
                             data-testid="clarify-option-enlarge"
-                            @click="openPreviewWall(curQuestion, o.id, false, i)"
+                            @click="openPreviewFocus(curQuestion, o.id, false, i)"
                           >
                             <Icon name="expand" :size="11" />{{ translate('pages.clarify.demoEnlarge') }}
                           </button>
@@ -777,6 +860,33 @@ function humanLiveCardLoading(live: NonNullable<ClarifyTurn['live']>, i: number)
                           class="input min-h-0 min-w-0 flex-1 border-0 bg-transparent p-0 text-[12px] shadow-none focus:border-transparent focus:ring-0 [overflow-wrap:anywhere]"
                           :placeholder="translate('pages.clarify.otherPlaceholder')"
                           data-testid="clarify-other-input"
+                        />
+                      </div>
+                      <div
+                        v-if="demoOptionsOf(curQuestion).length"
+                        class="mt-2.5"
+                        data-testid="clarify-inline-demos"
+                      >
+                        <div
+                          v-if="useSideBySide(demoOptionsOf(curQuestion))"
+                          class="grid gap-2.5"
+                          :class="demoGridColsClass(demoOptionsOf(curQuestion).length)"
+                        >
+                          <ClarifyDemoFrame
+                            v-for="o in demoOptionsOf(curQuestion)"
+                            :key="o.id"
+                            :label="o.label"
+                            :html="o.demoHtml!"
+                            :highlighted="isSelected(curQuestion.id, o.id)"
+                            @enlarge="openPreviewFocus(curQuestion, o.id, false, i)"
+                          />
+                        </div>
+                        <ClarifyDemoFrame
+                          v-else-if="selectedDemoForInteractive(curQuestion)"
+                          :label="selectedDemoForInteractive(curQuestion)!.label"
+                          :html="selectedDemoForInteractive(curQuestion)!.demoHtml!"
+                          highlighted
+                          @enlarge="openPreviewFocus(curQuestion, selectedDemoForInteractive(curQuestion)!.id, false, i)"
                         />
                       </div>
                     </div>
@@ -823,7 +933,7 @@ function humanLiveCardLoading(live: NonNullable<ClarifyTurn['live']>, i: number)
               </div>
             </div>
 
-            <!-- read-only history: prompt, chosen labels, and enlarge — previews stay in the window -->
+            <!-- read-only history: prompt, chosen labels, inline previews, and per-frame enlarge -->
             <div v-else class="mt-2 rounded-lg border border-n-clarify/20 bg-n-clarify/5 px-3 py-2">
               <div class="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-txt3">
                 <Icon name="chat" :size="12" class="text-n-clarify" />
@@ -862,11 +972,40 @@ function humanLiveCardLoading(live: NonNullable<ClarifyTurn['live']>, i: number)
                       type="button"
                       class="inline-flex shrink-0 items-center gap-0.5 rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] text-txt2 transition-colors hover:text-txt"
                       data-testid="clarify-option-enlarge"
-                      @click="openPreviewWall(q, o.id, true, i)"
+                      @click="openPreviewFocus(q, o.id, true, i)"
                     >
                       <Icon name="expand" :size="11" />{{ translate('pages.clarify.demoEnlarge') }}
                     </button>
                   </div>
+                </div>
+                <div
+                  v-if="demoOptionsOf(q).length"
+                  class="mt-2.5"
+                  data-testid="clarify-inline-demos"
+                >
+                  <div
+                    v-if="useSideBySide(demoOptionsOf(q))"
+                    class="grid gap-2.5"
+                    :class="demoGridColsClass(demoOptionsOf(q).length)"
+                  >
+                    <ClarifyDemoFrame
+                      v-for="o in demoOptionsOf(q)"
+                      :key="o.id"
+                      :label="o.label"
+                      :html="o.demoHtml!"
+                      :highlighted="selectedLabelsForQuestion(q, choiceRowsForAgentTurn(i)).includes(o.label)"
+                      :selected="selectedLabelsForQuestion(q, choiceRowsForAgentTurn(i)).includes(o.label)"
+                      @enlarge="openPreviewFocus(q, o.id, true, i)"
+                    />
+                  </div>
+                  <ClarifyDemoFrame
+                    v-else-if="selectedDemoOption(q, selectedLabelsForQuestion(q, choiceRowsForAgentTurn(i)))"
+                    :label="selectedDemoOption(q, selectedLabelsForQuestion(q, choiceRowsForAgentTurn(i)))!.label"
+                    :html="selectedDemoOption(q, selectedLabelsForQuestion(q, choiceRowsForAgentTurn(i)))!.demoHtml!"
+                    highlighted
+                    selected
+                    @enlarge="openPreviewFocus(q, selectedDemoOption(q, selectedLabelsForQuestion(q, choiceRowsForAgentTurn(i)))!.id, true, i)"
+                  />
                 </div>
               </div>
             </div>
@@ -1170,45 +1309,47 @@ function humanLiveCardLoading(live: NonNullable<ClarifyTurn['live']>, i: number)
     </div>
   </div>
 
-  <AppModal
-    :open="!!previewWall"
-    :title="translate('common.htmlPreview.enlargeTitle')"
-    :width="900"
-    close-on-esc
-    @close="closePreviewWall"
-  >
+  <Teleport to="body">
     <div
-      v-if="previewWall"
-      class="grid gap-2.5"
-      :class="wallGridClass"
-      data-testid="clarify-preview-wall"
+      v-if="showDemoWindow && focusedOption && previewFocus"
+      ref="demoWindowEl"
+      class="fixed z-50 flex flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-card"
+      role="dialog"
+      :aria-labelledby="demoWindowTitleId"
+      data-testid="clarify-demo-window"
+      :style="demoWindowStyle"
     >
-      <div
-        v-for="o in wallDemos"
-        :key="o.id"
-        class="relative min-w-0"
-        :data-preview-option="o.id"
-        data-testid="clarify-preview-card"
-      >
-        <div :class="previewWall.readonly ? '' : 'pointer-events-none'">
-          <ClarifyDemoFrame
-            :label="o.label"
-            :html="o.demoHtml || ''"
-            :highlighted="wallSelected(o)"
-            :selected="wallSelected(o)"
-          />
+      <div class="flex h-14 shrink-0 items-center gap-2 border-b border-line px-5">
+        <div :id="demoWindowTitleId" class="min-w-0 flex-1 truncate text-[15px] font-semibold text-txt">
+          {{ focusedTitle }}
         </div>
         <button
-          v-if="!previewWall.readonly"
           type="button"
-          class="absolute inset-0 rounded-lg"
-          :aria-label="o.label"
-          data-testid="clarify-preview-pick"
-          @click="onWallPick(o)"
-        />
+          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-txt3 hover:bg-elevated hover:text-txt"
+          data-testid="clarify-demo-window-close"
+          @click="closePreviewFocus"
+        >
+          <Icon name="close" :size="18" />
+        </button>
+      </div>
+      <div class="min-h-0 flex-1 overflow-y-auto p-4">
+        <div
+          class="min-w-0"
+          :data-preview-option="focusedOption.id"
+          data-testid="clarify-preview-wall"
+        >
+          <ClarifyDemoFrame
+            :label="focusedOption.label"
+            :html="windowDemoHtml"
+            :highlighted="focusedHighlighted"
+            :selected="previewFocus.readonly && focusedHighlighted"
+            :enlargeable="false"
+            expanded
+          />
+        </div>
       </div>
     </div>
-  </AppModal>
+  </Teleport>
 
   <!-- Human history attachment image preview (single slot; no gallery / Esc) -->
   <ChatImagePreviewModal
