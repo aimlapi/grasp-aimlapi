@@ -4,6 +4,11 @@ All notable public-release changes are documented here.
 
 ## Unreleased
 
+- **Agent wizard service address:** the OpenCode API Key step now hints the
+  picked vendor's real default base URL (from the model catalog) as the service
+  address placeholder, instead of a fixed `https://api.example.com/v1`. A vendor
+  with no published address, or a self-hosted gateway, falls back to neutral
+  copy. The field stays optional and blank by default.
 - **Control-plane restarts no longer wait for agents:** on SIGTERM Grasp now
   stops scheduling, finishes in-flight HTTP requests (at most 10s) and exits,
   instead of draining agent runs for up to 10 minutes (which outlasted
