@@ -21,7 +21,7 @@
 
 </div>
 
-Existing installations: read the [single-workspace upgrade guide](server/WORKSPACE_MIGRATION.md) before upgrading. Multi-project databases require an offline migration; historical records are retained.
+This release requires a fresh install: an empty database and an empty data directory.
 
 ## Why Grasp
 

@@ -90,7 +90,7 @@ func TestMcpServersFromAgentConfig(t *testing.T) {
 	host := mcp.NewHost(newMemStore())
 	p := newACPProvider(host, Options{
 		ProfilesRoot: root, MCPEndpoint: "http://mcp.local",
-		ProjectCredentialsForProject: func(string) map[string]string {
+		Credentials: func() map[string]string {
 			return map[string]string{"GITLAB_TOKEN": "tok"}
 		},
 	}).(*acpProvider)
@@ -108,7 +108,7 @@ func TestMcpServersFromAgentConfig(t *testing.T) {
 	if !strings.Contains(s, `"type":"http"`) {
 		t.Fatalf("mcpServers HTTP entry missing type:http (codebuddy skips url-only): %s", s)
 	}
-	// gitToken resolves from project credentials.
+	// gitToken resolves from workspace credentials.
 	if tok := p.gitToken(req); tok != "tok" {
 		t.Errorf("gitToken = %q, want tok", tok)
 	}
@@ -282,4 +282,22 @@ func eventWSServer(t *testing.T) (*httptest.Server, string, int) {
 	_, portStr, _ := strings.Cut(strings.TrimPrefix(srv.URL, "http://"), ":")
 	port, _ := strconv.Atoi(portStr)
 	return srv, "127.0.0.1", port
+}
+
+func TestIsWorkflowDroppedPlatformMCPMatchesRenamedEndpoints(t *testing.T) {
+	cases := []struct {
+		name, url string
+		want      bool
+	}{
+		{"mem", "http://grasp:8080/mcp/memory-store", true},
+		{"ctx", "http://grasp:8080/mcp/context-store", true},
+		{"sched", "http://grasp:8080/mcp/task-scheduler/agent-a", true},
+		{"Memory-Store", "", true},
+		{"git", "http://example.com/mcp/git", false},
+	}
+	for _, c := range cases {
+		if got := isWorkflowDroppedPlatformMCP(c.name, c.url); got != c.want {
+			t.Errorf("isWorkflowDroppedPlatformMCP(%q, %q) = %v, want %v", c.name, c.url, got, c.want)
+		}
+	}
 }
